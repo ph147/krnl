@@ -125,10 +125,10 @@ void putc(uint8_t c)
     }
 }
 
-// TODO negative numbers
-void printDec(int32_t n)
+static void printDec(int32_t n)
 {
     uint8_t *s;
+    uint32_t m = (uint32_t) n;
     uint8_t buf[STRING_BUF + 1];
     bool sign = FALSE;
 
@@ -143,13 +143,13 @@ void printDec(int32_t n)
     if (n < 0)
     {
         sign = TRUE;
-        n *= -1;
+        m = -n;
     }
-    while (n > 0)
+    while (m > 0)
     {
         --s;
-        *s = '0' + (n % 10);
-        n /= 10;
+        *s = '0' + (m % 10);
+        m /= 10;
     }
     if (sign)
     {
@@ -159,8 +159,7 @@ void printDec(int32_t n)
     puts(s);
 }
 
-// TODO negative numbers
-void printHex(int32_t n)
+static void printHex(uint32_t n)
 {
     uint8_t *s;
     uint8_t tmp;

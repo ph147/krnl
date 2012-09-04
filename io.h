@@ -9,7 +9,7 @@
 #define ROWS 25
 #define NORMAL_FONT 0x07
 #define TXT_ADDRESS 0xb8000
-#define STRING_BUF 10
+#define STRING_BUF 12
 #define TAB_WIDTH 8
 
 extern uint8_t cursor_x;
@@ -21,8 +21,8 @@ static void advanceCursor(void);
 void clearScreen(void);
 static void scroll();
 void putc(uint8_t c);
-void printHex(int32_t n);
-void printDec(int32_t n);
+static void printHex(uint32_t n);
+static void printDec(int32_t n);
 static void printTab(void);
 static void printNewline(void);
 void puts(char *s);

@@ -1,7 +1,7 @@
 #include "io.h"
 #include "gdt.h"
 //#include "types.h"
-//#include "string.h"
+#include "string.h"
 //#include "debug.h"
 
 void init(void)
@@ -13,5 +13,6 @@ void init(void)
 
 void main(void)
 {
-    kprintf("%d\n", -1);
+    int i = 0x80000000;
+    kprintf("%d\n", i);
 }

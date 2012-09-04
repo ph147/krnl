@@ -10,9 +10,7 @@ void isr_handler(registers_t regs)
             puts("Division by zero.\n");
             break;
         default:
-            puts("Unhandled interrupt: 0x");
-            printHex(regs.int_no);
-            putc('\n');
+            kprintf("Unhandled interrupt: 0x%x", regs.int_no);
     }
     if (regs.int_no < 32)
         asm volatile("hlt");
