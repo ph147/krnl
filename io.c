@@ -3,6 +3,7 @@
 
 uint8_t cursor_x = 0;
 uint8_t cursor_y = 0;
+uint8_t active_color = NORMAL_FONT;
 
 void kprintf(char *s, ...)
 {
@@ -57,7 +58,7 @@ static void updateCursor(uint8_t c, uint8_t r)
     outb(0x3D5,tmp);
 }
 
-void clearScreen(void)
+void clear(void)
 {
     uint8_t i, j;
     uint16_t *video = (uint16_t *) TXT_ADDRESS;
@@ -112,7 +113,7 @@ static void printTab()
 void putc(uint8_t c)
 {
     uint16_t *video = ((uint16_t *) TXT_ADDRESS);
-    uint16_t tmp = (NORMAL_FONT<<8) | c;
+    uint16_t tmp = (active_color<<8) | c;
 
     if (c == '\n')
         printNewline();
@@ -193,4 +194,19 @@ void puts(char *s)
         putc(*s);
         s++;
     }
+}
+
+void setbg(uint8_t color)
+{
+    active_color = (active_color & 0x0f) | ((color & 0x0f) << 4);
+}
+
+void setfg(uint8_t color)
+{
+    active_color = (active_color & 0xf0) | (color & 0x0f);
+}
+
+void resetcolor()
+{
+    active_color = NORMAL_FONT;
 }

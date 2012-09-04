@@ -1,18 +1,21 @@
 #include "io.h"
 #include "gdt.h"
 //#include "types.h"
-#include "string.h"
+//#include "string.h"
 //#include "debug.h"
 
 void init(void)
 {
     gdt_idt_init();
-    clearScreen();
+    clear();
     main();
 }
 
 void main(void)
 {
-    int i = 0x80000000;
-    kprintf("%d\n", i);
+    setfg(COLOR_GREEN | COLOR_LIGHT);
+    setbg(COLOR_RED | COLOR_LIGHT);
+    kprintf("test\n");
+    resetcolor();
+    kprintf("test\n");
 }
