@@ -6,13 +6,12 @@
 
 void init(void)
 {
-    clearScreen();
     gdt_idt_init();
+    clearScreen();
     main();
 }
 
 void main(void)
 {
-    int n = 2/0;
-    puts("test");
+    kprintf("%d\n", -1);
 }

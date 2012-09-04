@@ -3,6 +3,8 @@
 
 #include "types.h"
 
+// TODO colors
+
 #define COLS 80
 #define ROWS 25
 #define NORMAL_FONT 0x07
@@ -19,10 +21,11 @@ static void advanceCursor(void);
 void clearScreen(void);
 static void scroll();
 void putc(uint8_t c);
-void printHex(uint32_t n);
-void printDec(uint32_t n);
+void printHex(int32_t n);
+void printDec(int32_t n);
 static void printTab(void);
 static void printNewline(void);
 void puts(char *s);
+void kprintf(char *s, ...);
 
 #endif

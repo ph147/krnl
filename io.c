@@ -4,6 +4,44 @@
 uint8_t cursor_x = 0;
 uint8_t cursor_y = 0;
 
+void kprintf(char *s, ...)
+{
+    int arg = 2;
+    int tmp;
+    while (*s)
+    {
+        if (*s == '%')
+        {
+            ++s;
+            ++arg;
+            asm volatile("movl (%%ebp,%1,0x4), %0" : "=r" (tmp) : "r" (arg));
+            switch (*s)
+            {
+                case 'd':
+                    printDec(tmp);
+                    break;
+                case 'x':
+                    printHex(tmp);
+                    break;
+                case 'c':
+                    putc((char) tmp);
+                    break;
+                case 's':
+                    puts((char *) tmp);
+                    break;
+                case '%':
+                    putc('%');
+                    break;
+            }
+        }
+        else
+        {
+            putc(*s);
+        }
+        ++s;
+    }
+}
+
 void outb(uint16_t port, uint8_t value)
 {
     asm("outb %1, %0" :: "d" (port), "a" (value));
@@ -87,10 +125,12 @@ void putc(uint8_t c)
     }
 }
 
-void printDec(uint32_t n)
+// TODO negative numbers
+void printDec(int32_t n)
 {
     uint8_t *s;
     uint8_t buf[STRING_BUF + 1];
+    bool sign = FALSE;
 
     buf[STRING_BUF] = '\0';
     s = buf + STRING_BUF;
@@ -100,16 +140,27 @@ void printDec(uint32_t n)
         puts("0");
         return;
     }
+    if (n < 0)
+    {
+        sign = TRUE;
+        n *= -1;
+    }
     while (n > 0)
     {
         --s;
         *s = '0' + (n % 10);
         n /= 10;
     }
+    if (sign)
+    {
+        --s;
+        *s = '-';
+    }
     puts(s);
 }
 
-void printHex(uint32_t n)
+// TODO negative numbers
+void printHex(int32_t n)
 {
     uint8_t *s;
     uint8_t tmp;
