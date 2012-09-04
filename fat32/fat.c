@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include <inttypes.h>
 
-uint32_t start_of_fat;
-uint32_t start_of_data;
+#define LOWERCASE(c) (((c)>='A' && (c)<='Z') ? ((c)-'A'+'a') : (c))
+
+#define FILENAME "/home/test/fs.fat"
 
 typedef struct
 {
@@ -58,6 +59,15 @@ typedef struct
     uint32_t file_size;
 } __attribute__ ((packed)) file_t;
 
+typedef struct
+{
+    FILE *fp;
+    uint32_t start_of_fat;
+    uint32_t start_of_data;
+    uint32_t bytes_per_cluster;
+    bootsector_t boot;
+} mountpoint_t;
+
 static int isempty(char *s, size_t n)
 {
     size_t i;
@@ -79,13 +89,48 @@ static void fat_put_str(char *s)
     }
 }
 
-void fat_print_file(file_t *file)
+/* returns 0 on EOF */
+static uint32_t next_cluster(mountpoint_t *mount, uint32_t cluster)
 {
-    /*
-     * insgesamt 1,0K
-     * -rwxr-xr-x 1 root root 34 2012-09-04 14:53 datei1
-     * -rwxr-xr-x 1 root root 37 2012-09-04 14:53 datei2
-     */
+    uint32_t tmp;
+    fseek(mount->fp, mount->start_of_fat + 4*cluster, SEEK_SET);
+    fread(&tmp, sizeof(uint32_t), 1, mount->fp);
+    if (tmp == 0xfffffff)
+        return 0;
+    return tmp;
+}
+
+static uint32_t cluster_to_addr(mountpoint_t *mount, uint32_t cluster)
+{
+    uint32_t offset = (cluster-2) * mount->bytes_per_cluster;
+    return mount->start_of_data + offset;
+}
+
+static void print_file(mountpoint_t *mount, file_t *file)
+{
+    int i;
+    int count = 0;
+    uint32_t cluster = file->cluster;
+    uint32_t last_pos;
+    char buf[mount->bytes_per_cluster+1];
+
+    last_pos = cluster_to_addr(mount, cluster);
+
+    while (count < file->file_size)
+    {
+        fseek(mount->fp, last_pos, SEEK_SET);
+        count += fread(buf, sizeof(char),
+                mount->bytes_per_cluster, mount->fp);
+        buf[mount->bytes_per_cluster] = 0;
+        printf("%s", buf);
+        cluster = next_cluster(mount, cluster);
+        last_pos = cluster_to_addr(mount, cluster);
+        //last_pos = mount->bytes_per_cluster;
+    }
+}
+
+void fat_ls_file(mountpoint_t *mount, file_t *file)
+{
     int hours, minutes, seconds;
     int day, month, year;
 
@@ -112,45 +157,95 @@ void fat_print_file(file_t *file)
     putchar('\n');
 }
 
-void fat_ls_root(FILE *fp)
+static int fat_cmp(char c, char d)
 {
-    int i;
+    return LOWERCASE(c) == LOWERCASE(d);
+}
+
+static int fat_strcmp(char *fs_file, char *cmp_file)
+{
+    while (fat_cmp(*cmp_file, *fs_file))
+    {
+        ++cmp_file;
+        ++fs_file;
+    }
+    if (*cmp_file == '\0' && *fs_file == ' ')
+        return 1;
+    return 0;
+}
+
+void fat_cat(mountpoint_t *mount, char *filename)
+{
     file_t file;
 
-    fseek(fp, start_of_data + 0x20, SEEK_SET);
+    fseek(mount->fp, mount->start_of_data + 0x20, SEEK_SET);
     for (;;)
     {
-        fread(&file, sizeof(file_t), 1, fp);
+        fread(&file, sizeof(file_t), 1, mount->fp);
         if (file.short_file_name[0] == 0x00)
-            return;
-        fat_print_file(&file);
-        fseek(fp, 0x20, SEEK_CUR);
+        {
+            printf("%s: Datei nicht gefunden.\n", filename);
+            break;
+        }
+        if (fat_strcmp(file.short_file_name, filename))
+        {
+            print_file(mount, &file);
+            break;
+        }
+        fseek(mount->fp, 0x20, SEEK_CUR);
     }
 }
 
-FILE *initfat()
+void fat_ls_root(mountpoint_t *mount)
 {
-    bootsector_t boot;
+    file_t file;
+
+    fseek(mount->fp, mount->start_of_data + 0x20, SEEK_SET);
+    for (;;)
+    {
+        fread(&file, sizeof(file_t), 1, mount->fp);
+        if (file.short_file_name[0] == 0x00)
+            return;
+        fat_ls_file(mount, &file);
+        fseek(mount->fp, 0x20, SEEK_CUR);
+    }
+}
+
+void mount_fat32(mountpoint_t *mount, char *filename)
+{
     uint16_t bytes_per_sector;
     uint16_t reserved_sectors;
     uint32_t sectors_per_fat;
+    uint32_t sectors_per_cluster;
 
-    FILE *fp = fopen("fs.fat", "r");
-    fread(&boot, sizeof(bootsector_t), 1, fp);
+    FILE *fp = fopen(filename, "r");
+    fread(&(mount->boot), sizeof(bootsector_t), 1, fp);
 
-    bytes_per_sector = boot.bios_param.bytes_per_sector;
-    reserved_sectors = boot.bios_param.reserved_sectors;
-    sectors_per_fat = boot.bios_param.sectors_per_fat;
+    mount->fp = fp;
 
-    start_of_fat = boot.bios_param.bytes_per_sector * reserved_sectors;
-    start_of_data = start_of_fat + bytes_per_sector * sectors_per_fat * 2;
+    bytes_per_sector = mount->boot.bios_param.bytes_per_sector;
+    reserved_sectors = mount->boot.bios_param.reserved_sectors;
+    sectors_per_fat = mount->boot.bios_param.sectors_per_fat;
+    sectors_per_cluster = mount->boot.bios_param.sectors_per_cluster;
 
-    return fp;
+    mount->bytes_per_cluster = bytes_per_sector * sectors_per_cluster;
+    mount->start_of_fat = bytes_per_sector * reserved_sectors;
+    mount->start_of_data = mount->start_of_fat +
+        bytes_per_sector * sectors_per_fat * 2;
+}
+
+void umount(mountpoint_t *mount)
+{
+    fclose(mount->fp);
 }
 
 int main()
 {
-    FILE *fp = initfat();
-    fat_ls_root(fp);
-    fclose(fp);
+    mountpoint_t fat32;
+    mountpoint_t *mount = &fat32;
+
+    mount_fat32(mount, FILENAME);
+    fat_ls_root(mount);
+    fat_cat(mount, "long");
+    umount(mount);
 }
