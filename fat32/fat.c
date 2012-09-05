@@ -2,6 +2,8 @@
 #include <inttypes.h>
 #include <string.h>
 
+// TODO touch
+
 #define LOWERCASE(c) (((c)>='A' && (c)<='Z') ? ((c)-'A'+'a') : (c))
 
 #define FAT_READONLY 0x01
@@ -76,7 +78,7 @@ typedef struct
     uint32_t start_of_fat;
     uint32_t start_of_data;
     uint32_t current_directory_addr;
-    uint8_t isroot;
+    uint16_t current_directory_cluster;
     char current_directory[128];
     uint32_t bytes_per_cluster;
     bootsector_t boot;
@@ -166,6 +168,7 @@ int fat_chdir(mountpoint_t *mount, char *dirname)
         }
         if (!dir.cluster)
             dir.cluster = 2;
+        mount->current_directory_cluster = dir.cluster;
         mount->current_directory_addr = cluster_to_addr(mount, dir.cluster);
         if (dirname[0] == '.')
         {
@@ -294,16 +297,26 @@ void fat_cat(mountpoint_t *mount, char *filename)
 
 void fat_ls_dir(mountpoint_t *mount)
 {
+    int i;
+    uint16_t cluster;
     file_t file;
 
     printf("Contents of %s\n", mount->current_directory);
-    fseek(mount->fp, mount->current_directory_addr, SEEK_SET);
     for (;;)
     {
-        fread(&file, sizeof(file_t), 1, mount->fp);
-        if (file.short_file_name[0] == 0x00)
-            return;
-        fat_ls_file(mount, &file);
+        fseek(mount->fp, mount->current_directory_addr, SEEK_SET);
+        for (i = 0; i < 16; ++i)
+        {
+            fread(&file, sizeof(file_t), 1, mount->fp);
+            if (file.short_file_name[0] == 0x00)
+                continue;
+            fat_ls_file(mount, &file);
+        }
+        cluster = next_cluster(mount, mount->current_directory_cluster);
+        if (!cluster)
+            break;
+        mount->current_directory_cluster = cluster;
+        mount->current_directory_addr = cluster_to_addr(mount, cluster);
     }
 }
 
@@ -331,7 +344,7 @@ void mount_fat32(mountpoint_t *mount, char *filename)
     mount->current_directory_addr = mount->start_of_data;
     mount->current_directory[0] = '/';
     mount->current_directory[1] = '\0';
-    mount->isroot = 1;
+    mount->current_directory_cluster = 2;
 }
 
 void umount(mountpoint_t *mount)
