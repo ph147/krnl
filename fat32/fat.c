@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <inttypes.h>
+#include <string.h>
 
 #define LOWERCASE(c) (((c)>='A' && (c)<='Z') ? ((c)-'A'+'a') : (c))
 
@@ -9,6 +10,9 @@
 #define FAT_SPECIAL 0x08
 #define FAT_SUBDIR 0x10
 #define FAT_ARCHIVE 0x20
+
+#define FAT_DELETED 0xe5
+#define FAT_LAST_CLUSTER 0xfffffff
 
 #define FILENAME "/home/test/fs.fat"
 
@@ -72,7 +76,8 @@ typedef struct
     uint32_t start_of_fat;
     uint32_t start_of_data;
     uint32_t current_directory_addr;
-    char current_directory[9];
+    uint8_t isroot;
+    char current_directory[128];
     uint32_t bytes_per_cluster;
     bootsector_t boot;
 } mountpoint_t;
@@ -104,7 +109,7 @@ static uint32_t next_cluster(mountpoint_t *mount, uint32_t cluster)
     uint32_t tmp;
     fseek(mount->fp, mount->start_of_fat + 4*cluster, SEEK_SET);
     fread(&tmp, sizeof(uint32_t), 1, mount->fp);
-    if (tmp == 0xfffffff)
+    if (tmp == FAT_LAST_CLUSTER)
         return 0;
     return tmp;
 }
@@ -117,7 +122,6 @@ static uint32_t cluster_to_addr(mountpoint_t *mount, uint32_t cluster)
 
 static void print_file(mountpoint_t *mount, file_t *file)
 {
-    int i;
     int count = 0;
     uint32_t cluster = file->cluster;
     uint32_t last_pos;
@@ -137,8 +141,55 @@ static void print_file(mountpoint_t *mount, file_t *file)
     }
 }
 
-int fat_chdir(mountpoint_t *mount, file_t *file)
+void parent_dir(mountpoint_t *mount)
 {
+    char *s;
+    s = mount->current_directory;
+    while (*s)
+        ++s;
+    s -= 2;
+    while (*s != '/')
+        --s;
+    *(s+1) = '\0';
+}
+
+int fat_chdir(mountpoint_t *mount, char *dirname)
+{
+    file_t dir;
+
+    if (fat_search_file(mount, dirname, &dir))
+    {
+        if (!(dir.attributes & FAT_SUBDIR))
+        {
+            printf("%s: Not a directory.\n", dirname);
+            return 0;
+        }
+        if (!dir.cluster)
+            dir.cluster = 2;
+        mount->current_directory_addr = cluster_to_addr(mount, dir.cluster);
+        if (dirname[0] == '.')
+        {
+            if (dirname[1] != '.')
+                return 1;
+            parent_dir(mount);
+        }
+        else
+        {
+            strcat(mount->current_directory, dirname);
+            strcat(mount->current_directory, "/");
+        }
+        return 1;
+    }
+}
+
+int valid_file(mountpoint_t *mount, file_t *file)
+{
+    if ((file->attributes & FAT_READONLY) &&
+            (file->attributes & FAT_HIDDEN) &&
+            (file->attributes & FAT_SYSTEM) &&
+            (file->attributes & FAT_SPECIAL))
+        return 0;
+    return 1;
 }
 
 void fat_ls_file(mountpoint_t *mount, file_t *file)
@@ -146,7 +197,9 @@ void fat_ls_file(mountpoint_t *mount, file_t *file)
     int hours, minutes, seconds;
     int day, month, year;
 
-    if (file->short_file_name[0] == 0xe5)
+    if (file->short_file_name[0] == FAT_DELETED)
+        return;
+    if (!valid_file(mount, file))
         return;
 
     seconds = (file->created_time & 0x1f) * 2;
@@ -157,11 +210,15 @@ void fat_ls_file(mountpoint_t *mount, file_t *file)
     month = (file->created_date >> 5) & 0xf;
     year = 1980 + ((file->created_date >> 9) & 0x7f);
 
-    printf("%c ", (file->attributes & FAT_SUBDIR) ? 'D' : ' ');
+    printf("%c", (file->attributes & FAT_SUBDIR) ? 'd' : '-');
+    printf("r");
+    printf("%c", (file->attributes & FAT_READONLY) ? '-' : 'w');
+    printf("xr-xr-x ");
+    printf("root root ");
 
     printf("%d-%02d-%02d ", year, month, day);
     printf("%02d:%02d:%02d ", hours, minutes, seconds);
-    printf("%d ", file->file_size);
+    printf("%3d ", file->file_size);
     fat_put_str(file->short_file_name);
     if (!isempty(file->short_file_extension, 3))
     {
@@ -190,20 +247,35 @@ static int fat_strcmp(char *fs_file, char *cmp_file)
 
 int fat_search_file(mountpoint_t *mount, char *filename, file_t *file)
 {
-    fseek(mount->fp, mount->current_directory_addr + 0x20, SEEK_SET);
+    char *fname;
+    char *fext;
+
+    if (filename[0] == '.')
+        fname = filename;
+    else
+    {
+        fname = strtok(filename, ".");
+        fext = strtok(NULL, ".");
+    }
+    fseek(mount->fp, mount->current_directory_addr, SEEK_SET);
     for (;;)
     {
         fread(file, sizeof(file_t), 1, mount->fp);
+        if (!valid_file(mount, file))
+            continue;
         if (file->short_file_name[0] == 0x00)
         {
             printf("%s: Datei nicht gefunden.\n", filename);
             return 0;
         }
-        if (fat_strcmp(file->short_file_name, filename))
+        if (fat_strcmp(file->short_file_name, fname))
         {
-            return 1;
+            if (fext == NULL && file->short_file_extension[0] == ' ')
+                return 1;
+            if (fat_strcmp(file->short_file_extension, fext))
+                return 1;
+            return 0;
         }
-        fseek(mount->fp, 0x20, SEEK_CUR);
     }
 }
 
@@ -212,22 +284,26 @@ void fat_cat(mountpoint_t *mount, char *filename)
     file_t file;
 
     if (fat_search_file(mount, filename, &file))
-        print_file(mount, &file);
+    {
+        if (file.attributes & FAT_SUBDIR)
+            printf("%s/: Is a directory.\n", filename);
+        else
+            print_file(mount, &file);
+    }
 }
 
 void fat_ls_dir(mountpoint_t *mount)
 {
     file_t file;
 
-    printf("Contents of %s\n\n", mount->current_directory);
-    fseek(mount->fp, mount->current_directory_addr + 0x20, SEEK_SET);
+    printf("Contents of %s\n", mount->current_directory);
+    fseek(mount->fp, mount->current_directory_addr, SEEK_SET);
     for (;;)
     {
         fread(&file, sizeof(file_t), 1, mount->fp);
         if (file.short_file_name[0] == 0x00)
             return;
         fat_ls_file(mount, &file);
-        fseek(mount->fp, 0x20, SEEK_CUR);
     }
 }
 
@@ -255,11 +331,40 @@ void mount_fat32(mountpoint_t *mount, char *filename)
     mount->current_directory_addr = mount->start_of_data;
     mount->current_directory[0] = '/';
     mount->current_directory[1] = '\0';
+    mount->isroot = 1;
 }
 
 void umount(mountpoint_t *mount)
 {
     fclose(mount->fp);
+}
+
+void commandline(mountpoint_t *mount)
+{
+    char buf[128];
+    char *args[2];
+    for (;;)
+    {
+        printf("sh:%s$ ", mount->current_directory);
+        fgets(buf, 127, stdin);
+        args[0] = strtok(buf, " \n");
+        args[1] = strtok(NULL, " \n");
+
+        if (!strcmp(buf, "ls") || !strcmp(buf, "ll"))
+            fat_ls_dir(mount);
+        else
+        {
+            if (!args[1])
+            {
+                printf("%s: Command not found.\n", args[0]);
+                continue;
+            }
+            if (!strcmp(args[0], "cd"))
+                fat_chdir(mount, args[1]);
+            else if (!strcmp(args[0], "cat"))
+                fat_cat(mount, args[1]);
+        }
+    }
 }
 
 int main()
@@ -268,7 +373,14 @@ int main()
     mountpoint_t *mount = &fat32;
 
     mount_fat32(mount, FILENAME);
+
+    commandline(mount);
+
     fat_ls_dir(mount);
     fat_cat(mount, "long");
+    fat_chdir(mount, "ordner");
+    fat_ls_dir(mount);
+    fat_chdir(mount, "..");
+    fat_ls_dir(mount);
     umount(mount);
 }
