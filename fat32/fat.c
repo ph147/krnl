@@ -15,7 +15,6 @@
 #define FAT_ARCHIVE 0x20
 
 #define FAT_DELETED 0xe5
-#define FAT_LAST_CLUSTER 0xfffffff
 
 #define FILENAME "/home/test/fs.fat"
 
@@ -88,6 +87,7 @@ typedef struct
 static int isempty(char *s, size_t n);
 static void fat_put_str(char *s);
 static uint32_t next_cluster(mountpoint_t *mount, uint32_t cluster);
+static uint32_t is_last_cluster(mountpoint_t *mount, uint32_t cluster);
 static uint32_t cluster_to_addr(mountpoint_t *mount, uint32_t cluster);
 static void print_file(mountpoint_t *mount, file_t *file);
 void parent_dir(mountpoint_t *mount);
@@ -100,7 +100,8 @@ void split_filename(char *filename, int *fname, int *fext);
 int fat_search_file(mountpoint_t *mount, char *filename, file_t *file);
 void fat_cat(mountpoint_t *mount, char *filename);
 void next_dir_entry(mountpoint_t *mount);
-//void fat_rm(mountpoint_t *mount, char *filename);
+void fat_rm(mountpoint_t *mount, char *filename);
+// TODO void fat_mv(mountpoint_t *mount, char *source, char *destination);
 uint16_t next_free_cluster(mountpoint_t *mount);
 void fat_write_to_fat(mountpoint_t *mount, uint16_t cluster, uint32_t value);
 void fat_create_file(mountpoint_t *mount, char *filename);
@@ -133,13 +134,19 @@ static void fat_put_str(char *s)
     }
 }
 
+static uint32_t is_last_cluster(mountpoint_t *mount, uint32_t cluster)
+{
+    return ((cluster == 0xfff) || (cluster == 0xffff) || (cluster == 0xff8)
+            || (cluster == 0xfffffff) || (cluster ==0xfff8));
+}
+
 /* returns 0 on EOF */
 static uint32_t next_cluster(mountpoint_t *mount, uint32_t cluster)
 {
     uint32_t tmp;
     fseek(mount->fp, mount->start_of_fat + 4*cluster, SEEK_SET);
     fread(&tmp, sizeof(uint32_t), 1, mount->fp);
-    if (tmp == FAT_LAST_CLUSTER)
+    if (is_last_cluster(mount, tmp))
         return 0;
     return tmp;
 }
@@ -278,7 +285,7 @@ static int fat_strncmp(char *fs_file, char *cmp_file, int len)
         ++fs_file;
         ++count;
     }
-    if (*fs_file == ' ' || count == len)
+    if (count == len)
         return 1;
     return 0;
 }
@@ -288,7 +295,10 @@ void split_filename(char *filename, int *fname, int *fext)
     int count = 0;
 
     if (filename[0] == '.')
+    {
         *fname = strlen(filename);
+        *fext = 0;
+    }
     else
     {
         while (*filename != '.' && *filename)
@@ -309,6 +319,7 @@ void split_filename(char *filename, int *fname, int *fext)
 }
 
 // TODO refactor: same as fat_ls_dir, next_dir_entry; function pointers?
+// mount->fp at position of found file
 int fat_search_file(mountpoint_t *mount, char *filename, file_t *file)
 {
     int i;
@@ -345,6 +356,25 @@ int fat_search_file(mountpoint_t *mount, char *filename, file_t *file)
             break;
         addr = cluster_to_addr(mount, cluster);
     }
+}
+
+void fat_rm(mountpoint_t *mount, char *filename)
+{
+    file_t file;
+
+    if (fat_search_file(mount, filename, &file))
+    {
+        if (file.attributes & FAT_SUBDIR)
+            printf("rm: %s/: Is a directory.\n", filename);
+        else
+        {
+            file.short_file_name[0] = FAT_DELETED;
+            if (!fwrite(&file, 1, 1, mount->fp))
+                printf("rm: %s: I/O Error.\n", filename);
+        }
+    }
+    else
+        printf("rm: %s: File not found.\n", filename);
 }
 
 void fat_cat(mountpoint_t *mount, char *filename)
@@ -384,8 +414,9 @@ void next_dir_entry(mountpoint_t *mount)
             }
         }
         cluster = next_cluster(mount, cluster);
+        printf(">>>%d\n", cluster);
         if (!cluster)
-            break;
+            ; // TODO create new cluster
         addr = cluster_to_addr(mount, cluster);
     }
 }
@@ -412,6 +443,7 @@ void fat_write_to_fat(mountpoint_t *mount, uint16_t cluster, uint32_t value)
         printf("Write error: Could not write to FAT.\n");
 }
 
+// TODO create new cluster if full
 void fat_create_file(mountpoint_t *mount, char *filename)
 {
     file_t file;
@@ -564,6 +596,13 @@ void commandline(mountpoint_t *mount)
                 fat_cat(mount, args[1]);
             else if (!strcmp(args[0], "touch"))
                 fat_touch(mount, args[1]);
+            else if (!strcmp(args[0], "rm"))
+                fat_rm(mount, args[1]);
+            else
+            {
+                printf("%s: Command not found.\n", args[0]);
+                continue;
+            }
         }
     }
 }
