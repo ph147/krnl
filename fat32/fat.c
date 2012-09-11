@@ -5,8 +5,6 @@
 #include "fat.h"
 #include "btree.h"
 
-// TODO sort ls
-
 const char *fat_legal_chars = "!#$%&'()-@^_`{}~";
 
 #define FILENAME "/home/test/fs.fat"
@@ -368,6 +366,8 @@ int fat_mkdir(mountpoint_t *mount, char *filename)
     }
 
     next = next_free_cluster(mount, 0);
+    if (!next)
+        return 0;
 
     if (!fat_create_file(mount, filename, FAT_SUBDIR, next))
     {
@@ -400,7 +400,7 @@ void fat_cat(mountpoint_t *mount, char *filename)
 }
 
 // sets file pointer to next free directory entry
-static void next_dir_entry(mountpoint_t *mount)
+static int next_dir_entry(mountpoint_t *mount)
 {
     size_t i;
     uint16_t next;
@@ -418,17 +418,20 @@ static void next_dir_entry(mountpoint_t *mount)
                     file.short_file_name[0] == FAT_DELETED)
             {
                 fseek(mount->fp, -sizeof(file_t), SEEK_CUR);
-                return;
+                return 1;
             }
         }
         next = next_cluster(mount, cluster);
         if (!next)
+        {
             next = next_free_cluster(mount, cluster);
+            if (!next)
+                return 0;
+        }
         addr = cluster_to_addr(mount, next);
     }
 }
 
-// TODO drive full
 static uint16_t next_free_cluster(mountpoint_t *mount, uint16_t last_cluster)
 {
     uint32_t tmp;
@@ -446,6 +449,11 @@ static uint16_t next_free_cluster(mountpoint_t *mount, uint16_t last_cluster)
             return cluster;
         }
         ++cluster;
+        if (cluster >= mount->length_of_fat)
+        {
+            printf("Error: Drive full.\n");
+            return 0;
+        }
     }
 }
 
@@ -504,7 +512,8 @@ static int fat_create_file(mountpoint_t *mount, char *filename, uint8_t att, uin
     file.file_size = 0;
     file.cluster = cluster;
 
-    next_dir_entry(mount);
+    if (!next_dir_entry(mount))
+        return 0;
     if (!fwrite(&file, sizeof(file_t), 1, mount->fp))
     {
         printf("touch: %s: Write error.\n", filename);

@@ -106,7 +106,7 @@ static void split_filename(char *filename, int *fname, int *fext);
 static uint16_t next_free_cluster(mountpoint_t *mount, uint16_t last_cluster);
 static void fat_write_to_fat(mountpoint_t *mount, uint16_t cluster, uint32_t value);
 static int fat_create_file(mountpoint_t *mount, char *filename, uint8_t att, uint16_t cluster);
-static void next_dir_entry(mountpoint_t *mount);
+static int next_dir_entry(mountpoint_t *mount);
 static void uppercase(char *s, int len);
 
 void parent_dir(mountpoint_t *mount);
