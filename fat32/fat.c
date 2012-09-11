@@ -7,6 +7,8 @@
 
 // TODO sort ls
 
+const char *fat_legal_chars = "!#$%&'()-@^_`{}~";
+
 #define FILENAME "/home/test/fs.fat"
 
 static int isempty(uint8_t *s, size_t n)
@@ -539,6 +541,7 @@ void fat_ls_dir(mountpoint_t *mount)
     uint16_t cluster = mount->current_directory_cluster;
     uint32_t addr = mount->current_directory_addr;
     file_t file;
+    btree *tree = NULL;
 
     printf("Contents of %s\n", mount->current_directory);
     for (;;)
@@ -549,13 +552,16 @@ void fat_ls_dir(mountpoint_t *mount)
             fread(&file, sizeof(file_t), 1, mount->fp);
             if (file.short_file_name[0] == 0x00)
                 continue;
-            fat_ls_file(&file);
+            tree = add_node(tree, file);
+            //fat_ls_file(&file);
         }
         cluster = next_cluster(mount, cluster);
         if (!cluster)
             break;
         addr = cluster_to_addr(mount, cluster);
     }
+    print_tree(tree);
+    delete_tree(tree);
 }
 
 void mount_fat32(mountpoint_t *mount, char *filename)

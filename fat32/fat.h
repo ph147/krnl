@@ -1,6 +1,8 @@
 #ifndef _FAT_H
 #define _FAT_H
 
+#include <inttypes.h>
+
 #define DEBUG printf
 
 #define COLOR_DIR "\e[1;34m"
@@ -21,7 +23,7 @@
 #define FAT_LAST_CLUSTER 0xfffffff
 #define FAT_EMPTY 0x0
 
-const char *fat_legal_chars = "!#$%&'()-@^_`{}~";
+extern const char *fat_legal_chars;
 
 typedef struct
 {
